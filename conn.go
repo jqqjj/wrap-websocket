@@ -7,9 +7,9 @@ import (
 )
 
 type Conn struct {
-	mux  sync.Mutex
-	ctx  context.Context
-	conn *websocket.Conn
+	*websocket.Conn
+
+	mux sync.Mutex
 
 	closedCallback []func()
 
@@ -18,7 +18,7 @@ type Conn struct {
 }
 
 func NewConn(ctx context.Context, conn *websocket.Conn) *Conn {
-	c := &Conn{ctx: ctx, conn: conn, queueJson: make([]any, 0), trigger: make(chan struct{}, 1)}
+	c := &Conn{Conn: conn, queueJson: make([]any, 0), trigger: make(chan struct{}, 1)}
 	go func() {
 		for {
 			select {
@@ -40,7 +40,7 @@ func (c *Conn) flush() {
 	c.mux.Unlock()
 
 	for _, v := range arr {
-		c.conn.WriteJSON(v)
+		c.Conn.WriteJSON(v)
 	}
 }
 
@@ -52,11 +52,11 @@ func (c *Conn) Close() error {
 	for _, f := range c.closedCallback {
 		f()
 	}
-	return c.conn.Close()
+	return c.Conn.Close()
 }
 
 func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
-	return c.conn.ReadMessage()
+	return c.Conn.ReadMessage()
 }
 
 func (c *Conn) SendJSON(v any) {

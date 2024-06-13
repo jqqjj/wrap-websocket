@@ -11,10 +11,11 @@ import (
 )
 
 type clientEntity struct {
-	Version string `json:"version"`
-	UUID    string `json:"uuid"`
-	Command string `json:"command"`
-	Payload any    `json:"payload"`
+	ClientId string `json:"client_id"`
+	Version  string `json:"version"`
+	UUID     string `json:"uuid"`
+	Command  string `json:"command"`
+	Payload  any    `json:"payload"`
 }
 
 type clientRequest struct {
@@ -24,9 +25,10 @@ type clientRequest struct {
 }
 
 type Client struct {
-	addr    string
-	version string
-	timeout time.Duration
+	clientId string
+	addr     string
+	version  string
+	timeout  time.Duration
 
 	queueBuffer chan clientRequest
 	querying    sync.Map
@@ -38,11 +40,12 @@ type Client struct {
 	onClosed    func()
 }
 
-func NewClient(addr, version string, timeoutDuration time.Duration) *Client {
+func NewClient(clientId, addr, version string, timeoutDuration time.Duration) *Client {
 	if timeoutDuration < time.Second {
 		timeoutDuration = time.Second * 30
 	}
 	return &Client{
+		clientId:    clientId,
 		addr:        addr,
 		version:     version,
 		timeout:     timeoutDuration,
@@ -110,10 +113,11 @@ func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, er
 		req = clientRequest{
 			tryLeft: 1,
 			body: clientEntity{
-				Version: c.version,
-				UUID:    reqId,
-				Command: command,
-				Payload: data,
+				ClientId: c.clientId,
+				Version:  c.version,
+				UUID:     reqId,
+				Command:  command,
+				Payload:  data,
 			},
 		}
 	)

@@ -3,7 +3,6 @@ package wrap
 import (
 	"context"
 	"encoding/json"
-	"github.com/gorilla/websocket"
 	"net"
 	"sync"
 )
@@ -18,7 +17,7 @@ func NewServer() *Server {
 	}
 }
 
-func (s *Server) Process(ctx context.Context, c *websocket.Conn) {
+func (s *Server) Process(ctx context.Context, conn *Conn) {
 	var (
 		err  error
 		data []byte
@@ -27,8 +26,7 @@ func (s *Server) Process(ctx context.Context, c *websocket.Conn) {
 
 		subCtx, subCancel = context.WithCancel(ctx)
 
-		ip   = c.RemoteAddr().(*net.TCPAddr).IP.String()
-		conn = NewConn(subCtx, c)
+		ip = conn.RemoteAddr().(*net.TCPAddr).IP.String()
 	)
 	defer subCancel()
 
@@ -40,10 +38,11 @@ func (s *Server) Process(ctx context.Context, c *websocket.Conn) {
 	for {
 		var (
 			req struct {
-				Version string          `json:"version"`
-				UUID    string          `json:"uuid"`
-				Command string          `json:"command"`
-				Payload json.RawMessage `json:"payload"`
+				ClientId string          `json:"client_id"`
+				Version  string          `json:"version"`
+				UUID     string          `json:"uuid"`
+				Command  string          `json:"command"`
+				Payload  json.RawMessage `json:"payload"`
 			}
 			respEntity = NewResponse(conn)
 		)
@@ -61,6 +60,7 @@ func (s *Server) Process(ctx context.Context, c *websocket.Conn) {
 			meta = &sync.Map{}
 		}
 		reqEntity := &Request{
+			ClientId: req.ClientId,
 			Version:  req.Version,
 			UUID:     req.UUID,
 			Command:  req.Command,

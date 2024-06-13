@@ -6,6 +6,7 @@ import (
 )
 
 type Request struct {
+	ClientId string
 	Version  string
 	UUID     string
 	Command  string

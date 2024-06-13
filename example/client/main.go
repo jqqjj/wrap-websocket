@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	server "github.com/jqqjj/wrap-websocket"
+	uuid "github.com/satori/go.uuid"
 	"log"
 	"time"
 )
@@ -12,11 +13,11 @@ func main() {
 	var (
 		ch          = make(chan []byte)
 		uri         = fmt.Sprintf("ws://%s/", "localhost:8089")
-		ctx, cancel = context.WithTimeout(context.Background(), time.Second*10)
+		ctx, cancel = context.WithTimeout(context.Background(), time.Minute*1)
 	)
 	defer cancel()
 
-	client := server.NewClient(uri, "0.1", time.Second*15)
+	client := server.NewClient(uuid.NewV4().String(), uri, "0.1", time.Second*15)
 	go client.Run(ctx)
 
 	client.Subscribe(ctx, "haha", ch)

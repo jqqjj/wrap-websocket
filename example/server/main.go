@@ -14,8 +14,8 @@ func main() {
 
 	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		var (
-			err  error
-			conn *websocket.Conn
+			err error
+			c   *websocket.Conn
 
 			u = websocket.Upgrader{
 				ReadBufferSize:  1024 * 4,
@@ -24,13 +24,13 @@ func main() {
 			}
 		)
 
-		if conn, err = u.Upgrade(writer, request, nil); err != nil {
+		if c, err = u.Upgrade(writer, request, nil); err != nil {
 			writer.Write([]byte("error when upgrade to websocket"))
 			return
 		}
-		defer conn.Close()
+		defer c.Close()
 
-		srv.Process(ctx, conn)
+		srv.Process(ctx, wrap.NewConn(ctx, c))
 	})
 
 	http.ListenAndServe("0.0.0.0:8089", nil)
