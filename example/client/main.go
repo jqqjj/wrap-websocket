@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	server "github.com/jqqjj/wrap-websocket"
+	"github.com/jqqjj/wrap-websocket"
 	uuid "github.com/satori/go.uuid"
 	"log"
 	"time"
@@ -17,7 +17,7 @@ func main() {
 	)
 	defer cancel()
 
-	client := server.NewClient(uuid.NewV4().String(), uri, "0.1", time.Second*15)
+	client := wrap.NewClient(uuid.NewV4().String(), uri, "0.1", time.Second*15)
 	go client.Run(ctx)
 
 	client.Subscribe(ctx, "haha", ch)
