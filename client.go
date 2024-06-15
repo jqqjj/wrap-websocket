@@ -35,9 +35,9 @@ type Client struct {
 	pubSubPush  *PubSub[string, []byte]
 	pubSubResp  *PubSub[string, []byte]
 
-	onDialError func()
-	onConnected func(conn *websocket.Conn)
-	onClosed    func()
+	onDialError func(*Client)
+	onConnected func(*Client)
+	onClosed    func(*Client)
 }
 
 func NewClient(clientId, addr, version string, timeoutDuration time.Duration) *Client {
@@ -79,7 +79,7 @@ func (c *Client) Run(ctx context.Context) {
 
 		if conn, _, err = dial.DialContext(ctx, c.addr, nil); err != nil {
 			if callback := c.onDialError; callback != nil {
-				callback()
+				callback(c)
 			}
 			fails++
 			ticker.Reset(time.Duration(fails) * 2 * time.Second)
@@ -89,14 +89,14 @@ func (c *Client) Run(ctx context.Context) {
 
 		//connected事件
 		if callback := c.onConnected; callback != nil {
-			callback(conn)
+			callback(c)
 		}
 
 		c.loop(ctx, conn)
 
 		//closed事件
 		if callback := c.onClosed; callback != nil {
-			callback()
+			callback(c)
 		}
 
 		ticker.Reset(time.Millisecond)
@@ -153,13 +153,36 @@ func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, er
 	}
 }
 
-func (c *Client) SetDialErrCallback(f func()) {
+func (c *Client) SendWithoutResponse(command string, data any) bool {
+	var (
+		reqId = uuid.NewV4().String()
+		req   = clientRequest{
+			tryLeft: 1,
+			body: clientEntity{
+				ClientId: c.clientId,
+				Version:  c.version,
+				UUID:     reqId,
+				Command:  command,
+				Payload:  data,
+			},
+		}
+	)
+
+	select {
+	case c.queueBuffer <- req:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) SetDialErrCallback(f func(*Client)) {
 	c.onDialError = f
 }
-func (c *Client) SetConnectedCallback(f func(*websocket.Conn)) {
+func (c *Client) SetConnectedCallback(f func(*Client)) {
 	c.onConnected = f
 }
-func (c *Client) SetClosedCallback(f func()) {
+func (c *Client) SetClosedCallback(f func(*Client)) {
 	c.onClosed = f
 }
 
