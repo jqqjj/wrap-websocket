@@ -104,6 +104,10 @@ func (c *Client) Run(ctx context.Context) {
 }
 
 func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, error) {
+	return c.SendWithTries(ctx, 1, command, data)
+}
+
+func (c *Client) SendWithTries(ctx context.Context, tries int, command string, data any) ([]byte, error) {
 	var (
 		ch = make(chan []byte)
 
@@ -111,7 +115,7 @@ func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, er
 		subCtx, subCancel = context.WithTimeout(ctx, c.timeout)
 
 		req = clientRequest{
-			tryLeft: 1,
+			tryLeft: tries,
 			body: clientEntity{
 				ClientId: c.clientId,
 				Version:  c.version,
