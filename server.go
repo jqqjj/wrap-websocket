@@ -8,7 +8,6 @@ import (
 )
 
 type Server struct {
-	IpResolver func() string
 	*GroupServer
 }
 
@@ -34,8 +33,8 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 		conn.Close()
 	}()
 
-	if s.IpResolver != nil {
-		ip = s.IpResolver()
+	if conn.IpResolver != nil {
+		ip = conn.IpResolver()
 	} else {
 		ip = conn.RemoteAddr().(*net.TCPAddr).IP.String()
 	}

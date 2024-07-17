@@ -11,6 +11,7 @@ type Conn struct {
 
 	mux sync.Mutex
 
+	IpResolver     func() string
 	closedCallback []func()
 
 	queueJson []any
