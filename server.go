@@ -8,6 +8,7 @@ import (
 )
 
 type Server struct {
+	IpResolver func() string
 	*GroupServer
 }
 
@@ -21,12 +22,10 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 	var (
 		err  error
 		data []byte
-
+		ip   string
 		meta *sync.Map
 
 		subCtx, subCancel = context.WithCancel(ctx)
-
-		ip = conn.RemoteAddr().(*net.TCPAddr).IP.String()
 	)
 	defer subCancel()
 
@@ -34,6 +33,12 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 		<-subCtx.Done()
 		conn.Close()
 	}()
+
+	if s.IpResolver != nil {
+		ip = s.IpResolver()
+	} else {
+		ip = conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	}
 
 	for {
 		var (
