@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/jqqjj/wrap-websocket"
+	"net"
 	"net/http"
 )
 
@@ -30,7 +31,13 @@ func main() {
 		}
 		defer c.Close()
 
-		srv.Process(ctx, wrap.NewConn(ctx, c))
+		conn := wrap.NewConn(ctx, c)
+		//conn.AddrResolver = func(conn *wrap.Conn) net.Addr {
+		//	addr, _ := net.ResolveTCPAddr("tcp", "192.168.1.1:1080")
+		//	return addr
+		//}
+
+		srv.Process(ctx, conn)
 	})
 
 	http.ListenAndServe("0.0.0.0:8089", nil)
@@ -66,7 +73,7 @@ func wsServer() *wrap.Server {
 	})
 
 	g.SetHandle("sea", func(r *wrap.Request, w *wrap.Response) {
-		fmt.Printf("sea data:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientIP, r.RequestId)
+		fmt.Printf("sea data:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientAddr.(*net.TCPAddr).IP.String(), r.RequestId)
 		w.Success("sea")
 	})
 
@@ -82,7 +89,7 @@ func wsServer() *wrap.Server {
 
 	subG.SetHandle("test", func(r *wrap.Request, w *wrap.Response) {
 		//panic("panic  aaa")
-		fmt.Printf("payload:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientIP, r.RequestId)
+		fmt.Printf("payload:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientAddr.(*net.TCPAddr).IP.String(), r.RequestId)
 		w.Success("test")
 		p := wrap.NewPush(r.MustGet("conn").(*wrap.Conn))
 		p.Send("haha", struct {

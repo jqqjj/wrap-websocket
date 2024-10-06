@@ -21,7 +21,7 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 	var (
 		err  error
 		data []byte
-		ip   string
+		addr net.Addr
 		meta *sync.Map
 
 		subCtx, subCancel = context.WithCancel(ctx)
@@ -33,10 +33,10 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 		conn.Close()
 	}()
 
-	if conn.IpResolver != nil {
-		ip = conn.IpResolver()
+	if conn.AddrResolver != nil {
+		addr = conn.AddrResolver(conn)
 	} else {
-		ip = conn.RemoteAddr().(*net.TCPAddr).IP.String()
+		addr = conn.RemoteAddr()
 	}
 
 	for {
@@ -64,13 +64,13 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 			meta = &sync.Map{}
 		}
 		reqEntity := &Request{
-			ClientId:  req.ClientId,
-			Version:   req.Version,
-			RequestId: req.RequestId,
-			Command:   req.Command,
-			Payload:   req.Payload,
-			ClientIP:  ip,
-			meta:      meta,
+			ClientId:   req.ClientId,
+			Version:    req.Version,
+			RequestId:  req.RequestId,
+			Command:    req.Command,
+			Payload:    req.Payload,
+			ClientAddr: addr,
+			meta:       meta,
 		}
 
 		//处理心跳包

@@ -2,16 +2,17 @@ package wrap
 
 import (
 	"encoding/json"
+	"net"
 	"sync"
 )
 
 type Request struct {
-	ClientId  string
-	Version   string
-	RequestId string
-	Command   string
-	Payload   json.RawMessage
-	ClientIP  string
+	ClientId   string
+	Version    string
+	RequestId  string
+	Command    string
+	Payload    json.RawMessage
+	ClientAddr net.Addr
 
 	meta *sync.Map
 }

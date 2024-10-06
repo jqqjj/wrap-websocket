@@ -3,6 +3,7 @@ package wrap
 import (
 	"context"
 	"github.com/gorilla/websocket"
+	"net"
 	"sync"
 )
 
@@ -11,7 +12,7 @@ type Conn struct {
 
 	mux sync.Mutex
 
-	IpResolver     func() string
+	AddrResolver   func(*Conn) net.Addr
 	closedCallback []func()
 
 	queueJson []any
