@@ -14,7 +14,7 @@ func (p *Push) GetConn() *Conn {
 	return p.conn
 }
 
-func (p *Push) SendJSON(command string, object any) {
+func (p *Push) Send(command string, object any) {
 	resp := struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`

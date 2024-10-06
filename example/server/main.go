@@ -66,7 +66,7 @@ func wsServer() *wrap.Server {
 	})
 
 	g.SetHandle("sea", func(r *wrap.Request, w *wrap.Response) {
-		fmt.Printf("sea data:%s, command:%s, ip:%s, uuid:%s\n", r.Payload, r.Command, r.ClientIP, r.UUID)
+		fmt.Printf("sea data:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientIP, r.RequestId)
 		w.Success("sea")
 	})
 
@@ -82,10 +82,10 @@ func wsServer() *wrap.Server {
 
 	subG.SetHandle("test", func(r *wrap.Request, w *wrap.Response) {
 		//panic("panic  aaa")
-		fmt.Printf("payload:%s, command:%s, ip:%s, uuid:%s\n", r.Payload, r.Command, r.ClientIP, r.UUID)
+		fmt.Printf("payload:%s, command:%s, ip:%s, reqId:%s\n", r.Payload, r.Command, r.ClientIP, r.RequestId)
 		w.Success("test")
 		p := wrap.NewPush(r.MustGet("conn").(*wrap.Conn))
-		p.SendJSON("haha", struct {
+		p.Send("haha", struct {
 			Token string `json:"token"`
 		}{Token: "token123456"})
 	}, func(next wrap.HandleFunc, r *wrap.Request, w *wrap.Response) {

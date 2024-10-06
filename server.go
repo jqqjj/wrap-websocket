@@ -42,11 +42,11 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 	for {
 		var (
 			req struct {
-				ClientId string          `json:"client_id"`
-				Version  string          `json:"version"`
-				UUID     string          `json:"uuid"`
-				Command  string          `json:"command"`
-				Payload  json.RawMessage `json:"payload"`
+				ClientId  string          `json:"client_id"`
+				Version   string          `json:"version"`
+				RequestId string          `json:"request_id"`
+				Command   string          `json:"command"`
+				Payload   json.RawMessage `json:"payload"`
 			}
 			respEntity = NewResponse(conn)
 		)
@@ -64,13 +64,13 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 			meta = &sync.Map{}
 		}
 		reqEntity := &Request{
-			ClientId: req.ClientId,
-			Version:  req.Version,
-			UUID:     req.UUID,
-			Command:  req.Command,
-			Payload:  req.Payload,
-			ClientIP: ip,
-			meta:     meta,
+			ClientId:  req.ClientId,
+			Version:   req.Version,
+			RequestId: req.RequestId,
+			Command:   req.Command,
+			Payload:   req.Payload,
+			ClientIP:  ip,
+			meta:      meta,
 		}
 
 		//处理心跳包
@@ -112,14 +112,14 @@ func (s *Server) send(conn *Conn, req *Request, resp *Response) {
 	}
 
 	conn.SendJSON(struct {
-		UUID    string `json:"uuid"`
-		Type    string `json:"type"`
-		Command string `json:"command"`
-		Body    any    `json:"body"`
+		RequestId string `json:"request_id"`
+		Type      string `json:"type"`
+		Command   string `json:"command"`
+		Body      any    `json:"body"`
 	}{
-		UUID:    req.UUID,
-		Type:    "response",
-		Command: req.Command,
-		Body:    resp.GetResponseBody(),
+		RequestId: req.RequestId,
+		Type:      "response",
+		Command:   req.Command,
+		Body:      resp.GetResponseBody(),
 	})
 }

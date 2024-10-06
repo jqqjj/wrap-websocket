@@ -11,11 +11,11 @@ import (
 )
 
 type clientEntity struct {
-	ClientId string `json:"client_id"`
-	Version  string `json:"version"`
-	UUID     string `json:"uuid"`
-	Command  string `json:"command"`
-	Payload  any    `json:"payload"`
+	ClientId  string `json:"client_id"`
+	Version   string `json:"version"`
+	RequestId string `json:"request_id"`
+	Command   string `json:"command"`
+	Payload   any    `json:"payload"`
 }
 
 type clientRequest struct {
@@ -104,10 +104,10 @@ func (c *Client) Run(ctx context.Context) {
 }
 
 func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, error) {
-	return c.SendWithTries(ctx, 1, command, data)
+	return c.SendTries(ctx, 1, command, data)
 }
 
-func (c *Client) SendWithTries(ctx context.Context, tries int, command string, data any) ([]byte, error) {
+func (c *Client) SendTries(ctx context.Context, tries int, command string, data any) ([]byte, error) {
 	var (
 		ch = make(chan []byte)
 
@@ -117,11 +117,11 @@ func (c *Client) SendWithTries(ctx context.Context, tries int, command string, d
 		req = clientRequest{
 			tryLeft: tries,
 			body: clientEntity{
-				ClientId: c.clientId,
-				Version:  c.version,
-				UUID:     reqId,
-				Command:  command,
-				Payload:  data,
+				ClientId:  c.clientId,
+				Version:   c.version,
+				RequestId: reqId,
+				Command:   command,
+				Payload:   data,
 			},
 		}
 	)
@@ -157,17 +157,17 @@ func (c *Client) SendWithTries(ctx context.Context, tries int, command string, d
 	}
 }
 
-func (c *Client) SendWithoutResponse(command string, data any) bool {
+func (c *Client) SendAsync(command string, data any) bool {
 	var (
 		reqId = uuid.NewV4().String()
 		req   = clientRequest{
 			tryLeft: 1,
 			body: clientEntity{
-				ClientId: c.clientId,
-				Version:  c.version,
-				UUID:     reqId,
-				Command:  command,
-				Payload:  data,
+				ClientId:  c.clientId,
+				Version:   c.version,
+				RequestId: reqId,
+				Command:   command,
+				Payload:   data,
 			},
 		}
 	)
@@ -237,17 +237,17 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 	for _, v := range histories {
 		select {
 		case <-subCtx.Done():
-			c.querying.Store(v.body.UUID, v)
+			c.querying.Store(v.body.RequestId, v)
 		case c.queueBuffer <- v:
 		}
 	}
 
 	for {
 		var resp struct {
-			UUID    string          `json:"uuid"`
-			Type    string          `json:"type"` //response push
-			Command string          `json:"command"`
-			Body    json.RawMessage `json:"body"`
+			RequestId string          `json:"request_id"`
+			Type      string          `json:"type"` //response push
+			Command   string          `json:"command"`
+			Body      json.RawMessage `json:"body"`
 		}
 		if _, data, err = conn.ReadMessage(); err != nil {
 			return
@@ -260,13 +260,13 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 			continue
 		}
 
-		if val, ok := c.querying.LoadAndDelete(resp.UUID); ok {
+		if val, ok := c.querying.LoadAndDelete(resp.RequestId); ok {
 			ent := val.(clientRequest)
 			if ent.cancelWaiting != nil {
 				ent.cancelWaiting() //快速释放等待超时的线程
 			}
 			//发布响应数据通知
-			c.pubSubResp.Publish(resp.UUID, resp.Body)
+			c.pubSubResp.Publish(resp.RequestId, resp.Body)
 		}
 	}
 }
@@ -295,10 +295,10 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 				Data    any    `json:"data"`
 			}{
 				Code:    1,
-				Message: "retries exhausted",
+				Message: "attempts exhausted",
 				Data:    nil,
 			})
-			c.pubSubResp.Publish(req.body.UUID, data)
+			c.pubSubResp.Publish(req.body.RequestId, data)
 			continue
 		}
 
@@ -310,10 +310,10 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 		//保存到发送中队列
 		subCtx, subCancel := context.WithCancel(context.Background())
 		req.cancelWaiting = subCancel
-		c.querying.Store(req.body.UUID, req)
+		c.querying.Store(req.body.RequestId, req)
 		//设定定时器，超时继续重试
 		wg.Add(1)
-		go func(uuid string) {
+		go func(requestId string) {
 			defer wg.Done()
 			ticker := time.NewTimer(c.timeout)
 			defer ticker.Stop()
@@ -325,14 +325,14 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 			case <-ticker.C:
 			}
 			//执行重试
-			if val, ok := c.querying.LoadAndDelete(uuid); ok {
+			if val, ok := c.querying.LoadAndDelete(requestId); ok {
 				select {
 				case <-ctx.Done(): //外部退出时，重回querying列表
-					c.querying.Store(uuid, val.(clientRequest))
+					c.querying.Store(requestId, val.(clientRequest))
 				case c.queueBuffer <- val.(clientRequest):
 				}
 			}
-		}(req.body.UUID)
+		}(req.body.RequestId)
 	}
 }
 

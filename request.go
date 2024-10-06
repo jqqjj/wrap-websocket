@@ -6,12 +6,12 @@ import (
 )
 
 type Request struct {
-	ClientId string
-	Version  string
-	UUID     string
-	Command  string
-	Payload  json.RawMessage
-	ClientIP string
+	ClientId  string
+	Version   string
+	RequestId string
+	Command   string
+	Payload   json.RawMessage
+	ClientIP  string
 
 	meta *sync.Map
 }
