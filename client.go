@@ -158,10 +158,14 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 }
 
 func (c *Client) SendAsync(command string, data any) bool {
+	return c.SendTriesAsync(command, 1, data)
+}
+
+func (c *Client) SendTriesAsync(command string, tries int, data any) bool {
 	var (
 		reqId = uuid.NewV4().String()
 		req   = clientRequest{
-			tryLeft: 1,
+			tryLeft: tries,
 			body: clientEntity{
 				ClientId:  c.clientId,
 				Version:   c.version,
@@ -171,6 +175,9 @@ func (c *Client) SendAsync(command string, data any) bool {
 			},
 		}
 	)
+	if req.tryLeft < 1 {
+		req.tryLeft = 1
+	}
 
 	select {
 	case c.queueBuffer <- req:
