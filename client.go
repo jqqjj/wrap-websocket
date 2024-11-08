@@ -30,10 +30,11 @@ type Client struct {
 	version  string
 	timeout  time.Duration
 
-	queueBuffer chan clientRequest
-	querying    sync.Map
-	pubSubPush  *PubSub[string, []byte]
-	pubSubResp  *PubSub[string, []byte]
+	notify     chan struct{}
+	queueMux   sync.Mutex
+	queueItems []clientRequest
+	querying   sync.Map
+	pubSub     *PubSub[string, []byte]
 
 	onDialError func(*Client)
 	onConnected func(*Client)
@@ -45,13 +46,13 @@ func NewClient(clientId, addr, version string, timeoutDuration time.Duration) *C
 		timeoutDuration = time.Second * 30
 	}
 	return &Client{
-		clientId:    clientId,
-		addr:        addr,
-		version:     version,
-		timeout:     timeoutDuration,
-		queueBuffer: make(chan clientRequest, 100),
-		pubSubPush:  NewPubSub[string, []byte](),
-		pubSubResp:  NewPubSub[string, []byte](),
+		clientId:   clientId,
+		addr:       addr,
+		version:    version,
+		timeout:    timeoutDuration,
+		notify:     make(chan struct{}, 1),
+		queueItems: make([]clientRequest, 0),
+		pubSub:     NewPubSub[string, []byte](),
 	}
 }
 
@@ -65,24 +66,23 @@ func (c *Client) Run(ctx context.Context) {
 			HandshakeTimeout:  c.timeout,
 			EnableCompression: false,
 		}
-		ticker = time.NewTicker(time.Millisecond)
+		timer = time.NewTimer(time.Millisecond)
 	)
-	defer ticker.Stop()
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
-		ticker.Stop()
 
 		if conn, _, err = dial.DialContext(ctx, c.addr, nil); err != nil {
 			if callback := c.onDialError; callback != nil {
 				callback(c)
 			}
 			fails++
-			ticker.Reset(time.Duration(fails) * 2 * time.Second)
+			timer.Reset(time.Duration(fails) * 2 * time.Second)
 			continue
 		}
 		fails = 0
@@ -99,7 +99,7 @@ func (c *Client) Run(ctx context.Context) {
 			callback(c)
 		}
 
-		ticker.Reset(time.Millisecond)
+		timer.Reset(time.Millisecond)
 	}
 }
 
@@ -113,38 +113,26 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 
 		reqId             = uuid.NewV4().String()
 		subCtx, subCancel = context.WithTimeout(ctx, c.timeout)
-
-		req = clientRequest{
-			tryLeft: tries,
-			body: clientEntity{
-				ClientId:  c.clientId,
-				Version:   c.version,
-				RequestId: reqId,
-				Command:   command,
-				Payload:   data,
-			},
-		}
 	)
 	defer subCancel()
 
-	c.pubSubResp.Subscribe(subCtx, reqId, ch)
+	c.pubSub.Subscribe(subCtx, reqId, ch)
 
-	select {
-	case <-ctx.Done():
-		return nil, errors.New("canceled")
-	case <-subCtx.Done():
-		select {
-		case <-ctx.Done():
-			return nil, errors.New("canceled")
-		default:
-			return nil, errors.New("timeout")
-		}
-	case c.queueBuffer <- req:
+	if tries < 1 {
+		tries = 1
 	}
+	c.queue(clientRequest{
+		tryLeft: tries,
+		body: clientEntity{
+			ClientId:  c.clientId,
+			Version:   c.version,
+			RequestId: reqId,
+			Command:   command,
+			Payload:   data,
+		},
+	})
 
 	select {
-	case <-ctx.Done():
-		return nil, errors.New("canceled")
 	case <-subCtx.Done():
 		select {
 		case <-ctx.Done():
@@ -157,43 +145,36 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 	}
 }
 
-func (c *Client) SendAsync(command string, data any) bool {
-	return c.SendTriesAsync(command, 1, data)
+func (c *Client) SendAsync(command string, data any) {
+	c.SendTriesAsync(command, 1, data)
 }
 
-func (c *Client) SendTriesAsync(command string, tries int, data any) bool {
+func (c *Client) SendTriesAsync(command string, tries int, data any) {
 	var (
 		reqId = uuid.NewV4().String()
-		req   = clientRequest{
-			tryLeft: tries,
-			body: clientEntity{
-				ClientId:  c.clientId,
-				Version:   c.version,
-				RequestId: reqId,
-				Command:   command,
-				Payload:   data,
-			},
-		}
 	)
-	if req.tryLeft < 1 {
-		req.tryLeft = 1
+	if tries < 1 {
+		tries = 1
 	}
-
-	select {
-	case c.queueBuffer <- req:
-		return true
-	default:
-		return false
-	}
+	c.queue(clientRequest{
+		tryLeft: tries,
+		body: clientEntity{
+			ClientId:  c.clientId,
+			Version:   c.version,
+			RequestId: reqId,
+			Command:   command,
+			Payload:   data,
+		},
+	})
 }
 
-func (c *Client) SetDialErrCallback(f func(*Client)) {
+func (c *Client) OnDialErr(f func(*Client)) {
 	c.onDialError = f
 }
-func (c *Client) SetConnectedCallback(f func(*Client)) {
+func (c *Client) OnConnected(f func(*Client)) {
 	c.onConnected = f
 }
-func (c *Client) SetClosedCallback(f func(*Client)) {
+func (c *Client) OnClosed(f func(*Client)) {
 	c.onClosed = f
 }
 
@@ -212,18 +193,17 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(c.timeout)
-		defer ticker.Stop()
+		timer := time.NewTimer(c.timeout)
+		defer timer.Stop()
 		defer conn.Close() //处理外部退出时关闭conn
 		for {
 			select {
 			case <-subCtx.Done():
 				return
-			case <-ticker.C:
-				ticker.Stop()
+			case <-timer.C:
 			}
 			c.Send(subCtx, "ping", nil) //主动发心跳包
-			ticker.Reset(c.timeout)
+			timer.Reset(c.timeout)
 		}
 	}()
 
@@ -241,13 +221,7 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 		c.querying.Delete(key)
 		return true
 	})
-	for _, v := range histories {
-		select {
-		case <-subCtx.Done():
-			c.querying.Store(v.body.RequestId, v)
-		case c.queueBuffer <- v:
-		}
-	}
+	c.queue(histories...)
 
 	for {
 		var resp struct {
@@ -263,7 +237,7 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 			return
 		}
 		if resp.Type == "push" {
-			c.pubSubPush.Publish(resp.Command, resp.Body)
+			c.pubSub.Publish("#"+resp.Command+"#", resp.Body)
 			continue
 		}
 
@@ -273,7 +247,7 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 				ent.cancelWaiting() //快速释放等待超时的线程
 			}
 			//发布响应数据通知
-			c.pubSubResp.Publish(resp.RequestId, resp.Body)
+			c.pubSub.Publish(resp.RequestId, resp.Body)
 		}
 	}
 }
@@ -282,7 +256,6 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 	var (
 		err error
 		wg  sync.WaitGroup
-		req clientRequest
 	)
 	defer wg.Wait()
 
@@ -291,58 +264,78 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 		select {
 		case <-ctx.Done():
 			return
-		case req = <-c.queueBuffer:
+		case <-c.notify:
 		}
 
-		//没有重试机会的立即失败回调
-		if req.tryLeft <= 0 {
-			data, _ := json.Marshal(struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-				Data    any    `json:"data"`
-			}{
-				Code:    1,
-				Message: "attempts exhausted",
-				Data:    nil,
-			})
-			c.pubSubResp.Publish(req.body.RequestId, data)
-			continue
-		}
-
-		//发送
-		if err = conn.WriteJSON(req.body); err == nil {
-			req.tryLeft-- //只有真正写入conn，才扣除重试次数
-		}
-
-		//保存到发送中队列
-		subCtx, subCancel := context.WithCancel(context.Background())
-		req.cancelWaiting = subCancel
-		c.querying.Store(req.body.RequestId, req)
-		//设定定时器，超时继续重试
-		wg.Add(1)
-		go func(requestId string) {
-			defer wg.Done()
-			ticker := time.NewTimer(c.timeout)
-			defer ticker.Stop()
-			select {
-			case <-ctx.Done(): //外部退出执行这里
-				return
-			case <-subCtx.Done(): //成功收到发送响应，会执行这里，为了快速释放等待资源
-				return
-			case <-ticker.C:
+		for _, req := range c.dequeueAll() {
+			//没有重试机会的立即失败回调
+			if req.tryLeft <= 0 {
+				data, _ := json.Marshal(struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Data    any    `json:"data"`
+				}{
+					Code:    1,
+					Message: "attempts exhausted",
+					Data:    nil,
+				})
+				c.pubSub.Publish(req.body.RequestId, data)
+				continue
 			}
-			//执行重试
-			if val, ok := c.querying.LoadAndDelete(requestId); ok {
+
+			//发送
+			if err = conn.WriteJSON(req.body); err == nil {
+				req.tryLeft-- //只有真正写入conn，才扣除重试次数
+			}
+
+			//保存到发送中队列
+			subCtx, subCancel := context.WithCancel(context.Background())
+			req.cancelWaiting = subCancel
+			c.querying.Store(req.body.RequestId, req)
+			//设定定时器，超时继续重试
+			wg.Add(1)
+			go func(requestId string) {
+				defer wg.Done()
+				ticker := time.NewTimer(c.timeout)
+				defer ticker.Stop()
 				select {
-				case <-ctx.Done(): //外部退出时，重回querying列表
-					c.querying.Store(requestId, val.(clientRequest))
-				case c.queueBuffer <- val.(clientRequest):
+				case <-ctx.Done(): //外部退出执行这里
+					return
+				case <-subCtx.Done(): //成功收到发送响应，会执行这里，为了快速释放等待资源
+					return
+				case <-ticker.C:
 				}
-			}
-		}(req.body.RequestId)
+				//超时执行重试
+				if val, ok := c.querying.LoadAndDelete(requestId); ok {
+					c.queue(val.(clientRequest))
+				}
+			}(req.body.RequestId)
+		}
 	}
 }
 
+func (c *Client) queue(items ...clientRequest) {
+	c.queueMux.Lock()
+	defer c.queueMux.Unlock()
+
+	for _, item := range items {
+		c.queueItems = append(c.queueItems, item)
+	}
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Client) dequeueAll() []clientRequest {
+	c.queueMux.Lock()
+	defer c.queueMux.Unlock()
+
+	arr := c.queueItems
+	c.queueItems = make([]clientRequest, 0)
+	return arr
+}
+
 func (c *Client) Subscribe(ctx context.Context, topic string, ch chan<- []byte) {
-	c.pubSubPush.Subscribe(ctx, topic, ch)
+	c.pubSub.Subscribe(ctx, "#"+topic+"#", ch)
 }
