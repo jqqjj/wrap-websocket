@@ -283,15 +283,16 @@ func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 				continue
 			}
 
+			//保存到发送中队列
+			subCtx, subCancel := context.WithCancel(context.Background())
+			req.cancelWaiting = subCancel
+			c.querying.Store(req.body.RequestId, req)
+
 			//发送
 			if err = conn.WriteJSON(req.body); err == nil {
 				req.tryLeft-- //只有真正写入conn，才扣除重试次数
 			}
 
-			//保存到发送中队列
-			subCtx, subCancel := context.WithCancel(context.Background())
-			req.cancelWaiting = subCancel
-			c.querying.Store(req.body.RequestId, req)
 			//设定定时器，超时继续重试
 			wg.Add(1)
 			go func(requestId string) {
