@@ -25,5 +25,5 @@ func (p *Push) Send(command string, object any) {
 		Body:    object,
 	}
 
-	p.conn.SendJSON(resp)
+	p.conn.sendEntity(resp)
 }

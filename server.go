@@ -99,6 +99,11 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 
 		next(reqEntity, respEntity)
 		s.send(conn, reqEntity, respEntity)
+
+		if respEntity.closed {
+			conn.Close()
+			break
+		}
 	}
 }
 
@@ -111,7 +116,7 @@ func (s *Server) send(conn *Conn, req *Request, resp *Response) {
 		})
 	}
 
-	conn.SendJSON(struct {
+	conn.sendEntity(struct {
 		RequestId string `json:"request_id"`
 		Type      string `json:"type"`
 		Command   string `json:"command"`

@@ -54,6 +54,7 @@ func (c *Conn) Close() error {
 	for _, f := range c.closedCallback {
 		f()
 	}
+	c.flush()
 	return c.Conn.Close()
 }
 
@@ -61,7 +62,7 @@ func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 	return c.Conn.ReadMessage()
 }
 
-func (c *Conn) SendJSON(v any) {
+func (c *Conn) sendEntity(v any) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 

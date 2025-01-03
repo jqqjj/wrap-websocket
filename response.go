@@ -10,6 +10,8 @@ type Response struct {
 	filled bool
 	body   ResponseBody
 	conn   *Conn
+
+	closed bool
 }
 
 func NewResponse(conn *Conn) *Response {
@@ -20,6 +22,10 @@ func NewResponse(conn *Conn) *Response {
 
 func (r *Response) GetConn() *Conn {
 	return r.conn
+}
+
+func (r *Response) Close() {
+	r.closed = true
 }
 
 func (r *Response) GetResponseBody() ResponseBody {
