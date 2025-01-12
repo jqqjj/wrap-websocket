@@ -24,6 +24,12 @@ type clientRequest struct {
 	cancelWaiting context.CancelFunc
 }
 
+type ResponseEntity struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+}
+
 type Client struct {
 	clientId string
 	addr     string
@@ -103,13 +109,15 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
-func (c *Client) Send(ctx context.Context, command string, data any) ([]byte, error) {
+func (c *Client) Send(ctx context.Context, command string, data any) (*ResponseEntity, error) {
 	return c.SendTries(ctx, 1, command, data)
 }
 
-func (c *Client) SendTries(ctx context.Context, tries int, command string, data any) ([]byte, error) {
+func (c *Client) SendTries(ctx context.Context, tries int, command string, data any) (*ResponseEntity, error) {
 	var (
 		ch = make(chan []byte)
+
+		entity ResponseEntity
 
 		reqId             = uuid.NewV4().String()
 		subCtx, subCancel = context.WithTimeout(ctx, c.timeout)
@@ -141,7 +149,10 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 			return nil, errors.New("timeout")
 		}
 	case dataResp := <-ch:
-		return dataResp, nil
+		if err := json.Unmarshal(dataResp, &entity); err != nil {
+			return nil, err
+		}
+		return &entity, nil
 	}
 }
 

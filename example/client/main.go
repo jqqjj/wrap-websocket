@@ -41,7 +41,7 @@ func main() {
 			continue
 		}
 
-		log.Println("收到", string(data))
+		log.Println("收到", data.Code, data.Message, string(data.Data))
 
 		time.Sleep(time.Second)
 	}
