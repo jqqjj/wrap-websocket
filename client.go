@@ -144,13 +144,13 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 	case <-subCtx.Done():
 		select {
 		case <-ctx.Done():
-			return nil, errors.New("canceled")
+			return nil, ErrCanceled
 		default:
-			return nil, errors.New("timeout")
+			return nil, ErrTimeout
 		}
 	case dataResp := <-ch:
 		if err := json.Unmarshal(dataResp, &entity); err != nil {
-			return nil, err
+			return nil, errors.Join(err, ErrJsonParse)
 		}
 		return &entity, nil
 	}
