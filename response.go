@@ -1,5 +1,9 @@
 package wrap
 
+import (
+	"errors"
+)
+
 type ResponseBody struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -12,6 +16,11 @@ type Response struct {
 	conn   *Conn
 
 	closed bool
+}
+
+type INoError interface {
+	Error() string
+	Code() int
 }
 
 func NewResponse(conn *Conn) *Response {
@@ -39,6 +48,19 @@ func (r *Response) SetResponseBody(body ResponseBody) {
 
 func (r *Response) Success(object any) {
 	r.fill(0, "Success", object)
+}
+
+func (r *Response) Error(err error) {
+	var target INoError
+	if errors.As(err, &target) {
+		r.NoError(target)
+	} else {
+		r.FailWithMessage(err.Error())
+	}
+}
+
+func (r *Response) NoError(err INoError) {
+	r.FailWithCodeAndMessage(err.Code(), err.Error())
 }
 
 func (r *Response) Fail() {
