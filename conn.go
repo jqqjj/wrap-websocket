@@ -10,7 +10,8 @@ import (
 type Conn struct {
 	*websocket.Conn
 
-	mux sync.Mutex
+	mux      sync.Mutex
+	writeMux sync.Mutex
 
 	AddrResolver   func(*Conn) net.Addr
 	closedCallback []func()
@@ -41,6 +42,8 @@ func (c *Conn) flush() {
 	c.queueJson = c.queueJson[0:0]
 	c.mux.Unlock()
 
+	c.writeMux.Lock()
+	defer c.writeMux.Unlock()
 	for _, v := range arr {
 		c.Conn.WriteJSON(v)
 	}
