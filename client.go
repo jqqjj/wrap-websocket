@@ -93,17 +93,7 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		fails = 0
 
-		//connected事件
-		if callback := c.onConnected; callback != nil {
-			callback(c)
-		}
-
 		c.loop(ctx, conn)
-
-		//closed事件
-		if callback := c.onClosed; callback != nil {
-			callback(c)
-		}
 
 		timer.Reset(time.Millisecond)
 	}
@@ -198,9 +188,8 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 
 		subCtx, subCancel = context.WithCancel(ctx)
 	)
-	defer wg.Wait()
-	defer subCancel()
 
+	//建立监听外部退出任务 & 心跳包发送
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -218,12 +207,51 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 		}
 	}()
 
-	//建立单线程发送任务
+	//建立发送任务线程
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		c.runSending(subCtx, conn)
 	}()
+
+	//建立读取任务线程
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer subCancel()
+		for {
+			var resp struct {
+				RequestId string          `json:"request_id"`
+				Type      string          `json:"type"` //response push
+				Command   string          `json:"command"`
+				Body      json.RawMessage `json:"body"`
+			}
+			if _, data, err = conn.ReadMessage(); err != nil {
+				return
+			}
+			if err = json.Unmarshal(data, &resp); err != nil {
+				return
+			}
+			if resp.Type == "push" {
+				c.pubSub.Publish("#"+resp.Command+"#", resp.Body)
+				continue
+			}
+
+			if val, ok := c.querying.LoadAndDelete(resp.RequestId); ok {
+				ent := val.(clientRequest)
+				if ent.cancelWaiting != nil {
+					ent.cancelWaiting() //快速释放等待超时的线程
+				}
+				//发布响应数据通知
+				c.pubSub.Publish(resp.RequestId, resp.Body)
+			}
+		}
+	}()
+
+	//connected事件
+	if callback := c.onConnected; callback != nil {
+		callback(c)
+	}
 
 	//把正在发送中的队列重发
 	histories := make([]clientRequest, 0)
@@ -234,32 +262,11 @@ func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 	})
 	c.queue(histories...)
 
-	for {
-		var resp struct {
-			RequestId string          `json:"request_id"`
-			Type      string          `json:"type"` //response push
-			Command   string          `json:"command"`
-			Body      json.RawMessage `json:"body"`
-		}
-		if _, data, err = conn.ReadMessage(); err != nil {
-			return
-		}
-		if err = json.Unmarshal(data, &resp); err != nil {
-			return
-		}
-		if resp.Type == "push" {
-			c.pubSub.Publish("#"+resp.Command+"#", resp.Body)
-			continue
-		}
+	wg.Wait()
 
-		if val, ok := c.querying.LoadAndDelete(resp.RequestId); ok {
-			ent := val.(clientRequest)
-			if ent.cancelWaiting != nil {
-				ent.cancelWaiting() //快速释放等待超时的线程
-			}
-			//发布响应数据通知
-			c.pubSub.Publish(resp.RequestId, resp.Body)
-		}
+	//closed事件
+	if callback := c.onClosed; callback != nil {
+		callback(c)
 	}
 }
 
