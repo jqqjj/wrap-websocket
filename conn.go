@@ -2,6 +2,7 @@ package wrap
 
 import (
 	"context"
+	"fmt"
 	"github.com/gorilla/websocket"
 	"net"
 	"sync"
@@ -59,6 +60,10 @@ func (c *Conn) Close() error {
 	}
 	c.flush()
 	return c.Conn.Close()
+}
+
+func (c *Conn) ID() string {
+	return fmt.Sprintf("%p", c.Conn.NetConn())
 }
 
 func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
