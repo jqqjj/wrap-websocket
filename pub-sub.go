@@ -5,11 +5,16 @@ import (
 	"sync"
 )
 
+type PubSubChan[TOPIC comparable, DATA any] struct {
+	Topic TOPIC
+	Data  DATA
+}
+
 type PubSub[TOPIC comparable, DATA any] struct {
 	mux         sync.RWMutex
 	subscribers map[TOPIC][]struct {
 		ctx context.Context
-		ch  chan<- DATA
+		ch  chan<- PubSubChan[TOPIC, DATA]
 	}
 }
 
@@ -17,18 +22,18 @@ func NewPubSub[TOPIC comparable, DATA any]() *PubSub[TOPIC, DATA] {
 	return &PubSub[TOPIC, DATA]{
 		subscribers: make(map[TOPIC][]struct {
 			ctx context.Context
-			ch  chan<- DATA
+			ch  chan<- PubSubChan[TOPIC, DATA]
 		}),
 	}
 }
 
-func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC, ch chan<- DATA) {
+func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC, ch chan<- PubSubChan[TOPIC, DATA]) {
 	e.mux.Lock()
 	defer e.mux.Unlock()
 
 	e.subscribers[topic] = append(e.subscribers[topic], struct {
 		ctx context.Context
-		ch  chan<- DATA
+		ch  chan<- PubSubChan[TOPIC, DATA]
 	}{ctx: ctx, ch: ch})
 
 	go func() {
@@ -55,33 +60,23 @@ func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC, ch cha
 }
 
 func (e *PubSub[TOPIC, DATA]) Publish(topic TOPIC, data DATA) {
-	var (
-		ok         bool
-		collection []struct {
-			ctx context.Context
-			ch  chan<- DATA
-		}
-	)
-
 	e.mux.RLock()
 	defer e.mux.RUnlock()
 
-	if collection, ok = e.subscribers[topic]; !ok {
-		return
-	}
-
-	for _, v := range collection {
-		select {
-		case <-v.ctx.Done():
-			continue
-		case v.ch <- data:
-		default:
-			go func(ctx context.Context, ch chan<- DATA) {
-				select {
-				case <-ctx.Done():
-				case ch <- data:
-				}
-			}(v.ctx, v.ch)
+	if collection, ok := e.subscribers[topic]; ok {
+		for _, v := range collection {
+			select {
+			case <-v.ctx.Done():
+				continue
+			case v.ch <- PubSubChan[TOPIC, DATA]{Topic: topic, Data: data}:
+			default:
+				go func(ctx context.Context, ch chan<- PubSubChan[TOPIC, DATA]) {
+					select {
+					case <-ctx.Done():
+					case ch <- PubSubChan[TOPIC, DATA]{Topic: topic, Data: data}:
+					}
+				}(v.ctx, v.ch)
+			}
 		}
 	}
 }

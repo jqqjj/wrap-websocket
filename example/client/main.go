@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/jqqjj/wrap-websocket"
-	uuid "github.com/satori/go.uuid"
 	"log"
 	"time"
+
+	"github.com/jqqjj/wrap-websocket"
+	uuid "github.com/satori/go.uuid"
 )
 
 func main() {
 	var (
-		ch          = make(chan []byte)
+		ch          = make(chan wrap.PubSubChan[string, []byte])
 		uri         = fmt.Sprintf("ws://%s/", "localhost:8089")
 		ctx, cancel = context.WithTimeout(context.Background(), time.Minute*1)
 	)
@@ -24,7 +25,7 @@ func main() {
 
 	go func() {
 		for v := range ch {
-			log.Println("收到推送", string(v))
+			log.Println("收到推送", string(v.Data))
 		}
 	}()
 

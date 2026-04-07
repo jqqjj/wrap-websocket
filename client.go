@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/gorilla/websocket"
-	"github.com/satori/go.uuid"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/satori/go.uuid"
 )
 
 type clientEntity struct {
@@ -105,7 +106,7 @@ func (c *Client) Send(ctx context.Context, command string, data any) (*ResponseE
 
 func (c *Client) SendTries(ctx context.Context, tries int, command string, data any) (*ResponseEntity, error) {
 	var (
-		ch = make(chan []byte)
+		ch = make(chan PubSubChan[string, []byte])
 
 		entity ResponseEntity
 
@@ -125,7 +126,7 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 			ClientId:  c.clientId,
 			Version:   c.version,
 			RequestId: reqId,
-			Command:   command,
+			Command:   string(command),
 			Payload:   data,
 		},
 	})
@@ -139,7 +140,7 @@ func (c *Client) SendTries(ctx context.Context, tries int, command string, data 
 			return nil, ErrTimeout
 		}
 	case dataResp := <-ch:
-		if err := json.Unmarshal(dataResp, &entity); err != nil {
+		if err := json.Unmarshal(dataResp.Data, &entity); err != nil {
 			return nil, errors.Join(err, ErrJsonParse)
 		}
 		return &entity, nil
@@ -151,9 +152,6 @@ func (c *Client) SendAsync(command string, data any) {
 }
 
 func (c *Client) SendTriesAsync(command string, tries int, data any) {
-	var (
-		reqId = uuid.NewV4().String()
-	)
 	if tries < 1 {
 		tries = 1
 	}
@@ -162,7 +160,7 @@ func (c *Client) SendTriesAsync(command string, tries int, data any) {
 		body: clientEntity{
 			ClientId:  c.clientId,
 			Version:   c.version,
-			RequestId: reqId,
+			RequestId: uuid.NewV4().String(),
 			Command:   command,
 			Payload:   data,
 		},
@@ -355,6 +353,6 @@ func (c *Client) dequeueAll() []clientRequest {
 	return arr
 }
 
-func (c *Client) Subscribe(ctx context.Context, topic string, ch chan<- []byte) {
+func (c *Client) Subscribe(ctx context.Context, topic string, ch chan<- PubSubChan[string, []byte]) {
 	c.pubSub.Subscribe(ctx, "#"+topic+"#", ch)
 }
