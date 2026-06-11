@@ -31,7 +31,7 @@ type ResponseEntity struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-type Client[T ~string] struct {
+type Client struct {
 	clientId string
 	addr     string
 	version  string
@@ -41,29 +41,29 @@ type Client[T ~string] struct {
 	queueMux   sync.Mutex
 	queueItems []*clientRequest
 	querying   sync.Map
-	pubSub     *PubSub[T, []byte]
+	pubSub     *PubSub[string, []byte]
 
-	onDialError func(*Client[T])
-	onConnected func(*Client[T])
-	onClosed    func(*Client[T])
+	onDialError func(*Client)
+	onConnected func(*Client)
+	onClosed    func(*Client)
 }
 
-func NewClient[T ~string](clientId, addr, version string, timeoutDuration time.Duration) *Client[T] {
+func NewClient(clientId, addr, version string, timeoutDuration time.Duration) *Client {
 	if timeoutDuration < time.Second {
 		timeoutDuration = time.Second * 30
 	}
-	return &Client[T]{
+	return &Client{
 		clientId:   clientId,
 		addr:       addr,
 		version:    version,
 		timeout:    timeoutDuration,
 		notify:     make(chan struct{}, 1),
 		queueItems: make([]*clientRequest, 0),
-		pubSub:     NewPubSub[T, []byte](),
+		pubSub:     NewPubSub[string, []byte](),
 	}
 }
 
-func (c *Client[T]) Run(ctx context.Context) {
+func (c *Client) Run(ctx context.Context) {
 	var (
 		err   error
 		fails int
@@ -100,13 +100,13 @@ func (c *Client[T]) Run(ctx context.Context) {
 	}
 }
 
-func (c *Client[T]) Send(ctx context.Context, command string, data any) (*ResponseEntity, error) {
+func (c *Client) Send(ctx context.Context, command string, data any) (*ResponseEntity, error) {
 	return c.SendTries(ctx, 1, command, data)
 }
 
-func (c *Client[T]) SendTries(ctx context.Context, tries int, command string, data any) (*ResponseEntity, error) {
+func (c *Client) SendTries(ctx context.Context, tries int, command string, data any) (*ResponseEntity, error) {
 	var (
-		ch = make(chan PubSubChan[T, []byte])
+		ch = make(chan PubSubChan[string, []byte])
 
 		entity ResponseEntity
 
@@ -115,7 +115,7 @@ func (c *Client[T]) SendTries(ctx context.Context, tries int, command string, da
 	)
 	defer subCancel()
 
-	c.pubSub.Subscribe(subCtx, T(reqId), ch)
+	c.pubSub.Subscribe(subCtx, reqId, ch)
 
 	if tries < 1 {
 		tries = 1
@@ -147,11 +147,11 @@ func (c *Client[T]) SendTries(ctx context.Context, tries int, command string, da
 	}
 }
 
-func (c *Client[T]) SendAsync(command string, data any) {
+func (c *Client) SendAsync(command string, data any) {
 	c.SendTriesAsync(command, 1, data)
 }
 
-func (c *Client[T]) SendTriesAsync(command string, tries int, data any) {
+func (c *Client) SendTriesAsync(command string, tries int, data any) {
 	if tries < 1 {
 		tries = 1
 	}
@@ -167,17 +167,17 @@ func (c *Client[T]) SendTriesAsync(command string, tries int, data any) {
 	})
 }
 
-func (c *Client[T]) OnDialErr(f func(*Client[T])) {
+func (c *Client) OnDialErr(f func(*Client)) {
 	c.onDialError = f
 }
-func (c *Client[T]) OnConnected(f func(*Client[T])) {
+func (c *Client) OnConnected(f func(*Client)) {
 	c.onConnected = f
 }
-func (c *Client[T]) OnClosed(f func(*Client[T])) {
+func (c *Client) OnClosed(f func(*Client)) {
 	c.onClosed = f
 }
 
-func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
+func (c *Client) loop(ctx context.Context, conn *websocket.Conn) {
 	var (
 		err  error
 		data []byte
@@ -231,7 +231,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 				return
 			}
 			if resp.Type == "push" {
-				c.pubSub.Publish(T("#"+resp.Command+"#"), resp.Body)
+				c.pubSub.Publish("#"+resp.Command+"#", resp.Body)
 				continue
 			}
 
@@ -241,7 +241,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 					ent.cancelWaiting() //快速释放等待超时的线程
 				}
 				//发布响应数据通知
-				c.pubSub.Publish(T(resp.RequestId), resp.Body)
+				c.pubSub.Publish(resp.RequestId, resp.Body)
 			}
 		}
 	}()
@@ -268,7 +268,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-func (c *Client[T]) runSending(ctx context.Context, conn *websocket.Conn) {
+func (c *Client) runSending(ctx context.Context, conn *websocket.Conn) {
 	var (
 		err error
 		wg  sync.WaitGroup
@@ -323,7 +323,7 @@ func (c *Client[T]) runSending(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-func (c *Client[T]) publishAttemptsExhausted(requestId string) {
+func (c *Client) publishAttemptsExhausted(requestId string) {
 	data, _ := json.Marshal(struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
@@ -333,10 +333,10 @@ func (c *Client[T]) publishAttemptsExhausted(requestId string) {
 		Message: "attempts exhausted",
 		Data:    nil,
 	})
-	c.pubSub.Publish(T(requestId), data)
+	c.pubSub.Publish(requestId, data)
 }
 
-func (c *Client[T]) queue(items ...*clientRequest) {
+func (c *Client) queue(items ...*clientRequest) {
 	c.queueMux.Lock()
 	defer c.queueMux.Unlock()
 
@@ -349,7 +349,7 @@ func (c *Client[T]) queue(items ...*clientRequest) {
 	}
 }
 
-func (c *Client[T]) dequeueAll() []*clientRequest {
+func (c *Client) dequeueAll() []*clientRequest {
 	c.queueMux.Lock()
 	defer c.queueMux.Unlock()
 
@@ -358,6 +358,6 @@ func (c *Client[T]) dequeueAll() []*clientRequest {
 	return arr
 }
 
-func (c *Client[T]) Subscribe(ctx context.Context, topic T, ch chan<- PubSubChan[T, []byte]) {
+func (c *Client) Subscribe(ctx context.Context, topic string, ch chan<- PubSubChan[string, []byte]) {
 	c.pubSub.Subscribe(ctx, "#"+topic+"#", ch)
 }
