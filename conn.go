@@ -2,6 +2,7 @@ package wrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -30,14 +31,14 @@ func NewConn(ctx context.Context, conn *websocket.Conn) *Conn {
 			case <-ctx.Done():
 				return
 			case <-c.trigger:
-				c.flush()
+				_ = c.flush()
 			}
 		}
 	}()
 	return c
 }
 
-func (c *Conn) flush() {
+func (c *Conn) flush() error {
 	c.mux.Lock()
 	arr := make([]any, 0, len(c.queueJson))
 	arr = append(arr, c.queueJson...)
@@ -46,9 +47,16 @@ func (c *Conn) flush() {
 
 	c.writeMux.Lock()
 	defer c.writeMux.Unlock()
-	for _, v := range arr {
-		c.Conn.WriteJSON(v)
+	for i, v := range arr {
+		if err := c.Conn.WriteJSON(v); err != nil {
+			c.mux.Lock()
+			remaining := append([]any{v}, arr[i+1:]...)
+			c.queueJson = append(remaining, c.queueJson...)
+			c.mux.Unlock()
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *Conn) AddClosedCallback(f func()) {
@@ -59,8 +67,7 @@ func (c *Conn) Close() error {
 	for _, f := range c.closedCallback {
 		f()
 	}
-	c.flush()
-	return c.Conn.Close()
+	return errors.Join(c.flush(), c.Conn.Close())
 }
 
 func (c *Conn) ID() string {

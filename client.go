@@ -39,7 +39,7 @@ type Client[T ~string] struct {
 
 	notify     chan struct{}
 	queueMux   sync.Mutex
-	queueItems []clientRequest
+	queueItems []*clientRequest
 	querying   sync.Map
 	pubSub     *PubSub[T, []byte]
 
@@ -58,7 +58,7 @@ func NewClient[T ~string](clientId, addr, version string, timeoutDuration time.D
 		version:    version,
 		timeout:    timeoutDuration,
 		notify:     make(chan struct{}, 1),
-		queueItems: make([]clientRequest, 0),
+		queueItems: make([]*clientRequest, 0),
 		pubSub:     NewPubSub[T, []byte](),
 	}
 }
@@ -120,7 +120,7 @@ func (c *Client[T]) SendTries(ctx context.Context, tries int, command string, da
 	if tries < 1 {
 		tries = 1
 	}
-	c.queue(clientRequest{
+	c.queue(&clientRequest{
 		tryLeft: tries,
 		body: clientEntity{
 			ClientId:  c.clientId,
@@ -155,7 +155,7 @@ func (c *Client[T]) SendTriesAsync(command string, tries int, data any) {
 	if tries < 1 {
 		tries = 1
 	}
-	c.queue(clientRequest{
+	c.queue(&clientRequest{
 		tryLeft: tries,
 		body: clientEntity{
 			ClientId:  c.clientId,
@@ -236,7 +236,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 			}
 
 			if val, ok := c.querying.LoadAndDelete(resp.RequestId); ok {
-				ent := val.(clientRequest)
+				ent := val.(*clientRequest)
 				if ent.cancelWaiting != nil {
 					ent.cancelWaiting() //快速释放等待超时的线程
 				}
@@ -252,9 +252,9 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 	}
 
 	//把正在发送中的队列重发
-	histories := make([]clientRequest, 0)
+	histories := make([]*clientRequest, 0)
 	c.querying.Range(func(key, value any) bool {
-		histories = append(histories, value.(clientRequest))
+		histories = append(histories, value.(*clientRequest))
 		c.querying.Delete(key)
 		return true
 	})
@@ -286,16 +286,7 @@ func (c *Client[T]) runSending(ctx context.Context, conn *websocket.Conn) {
 		for _, req := range c.dequeueAll() {
 			//没有重试机会的立即失败回调
 			if req.tryLeft <= 0 {
-				data, _ := json.Marshal(struct {
-					Code    int    `json:"code"`
-					Message string `json:"message"`
-					Data    any    `json:"data"`
-				}{
-					Code:    1,
-					Message: "attempts exhausted",
-					Data:    nil,
-				})
-				c.pubSub.Publish(T(req.body.RequestId), data)
+				c.publishAttemptsExhausted(req.body.RequestId)
 				continue
 			}
 
@@ -313,25 +304,39 @@ func (c *Client[T]) runSending(ctx context.Context, conn *websocket.Conn) {
 			wg.Add(1)
 			go func(requestId string) {
 				defer wg.Done()
-				ticker := time.NewTimer(c.timeout)
-				defer ticker.Stop()
+				timer := time.NewTimer(c.timeout)
+				defer timer.Stop()
+
 				select {
 				case <-ctx.Done(): //外部退出执行这里
 					return
 				case <-subCtx.Done(): //成功收到发送响应，会执行这里，为了快速释放等待资源
 					return
-				case <-ticker.C:
+				case <-timer.C:
 				}
 				//超时执行重试
 				if val, ok := c.querying.LoadAndDelete(requestId); ok {
-					c.queue(val.(clientRequest))
+					c.queue(val.(*clientRequest))
 				}
 			}(req.body.RequestId)
 		}
 	}
 }
 
-func (c *Client[T]) queue(items ...clientRequest) {
+func (c *Client[T]) publishAttemptsExhausted(requestId string) {
+	data, _ := json.Marshal(struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    any    `json:"data"`
+	}{
+		Code:    1,
+		Message: "attempts exhausted",
+		Data:    nil,
+	})
+	c.pubSub.Publish(T(requestId), data)
+}
+
+func (c *Client[T]) queue(items ...*clientRequest) {
 	c.queueMux.Lock()
 	defer c.queueMux.Unlock()
 
@@ -344,12 +349,12 @@ func (c *Client[T]) queue(items ...clientRequest) {
 	}
 }
 
-func (c *Client[T]) dequeueAll() []clientRequest {
+func (c *Client[T]) dequeueAll() []*clientRequest {
 	c.queueMux.Lock()
 	defer c.queueMux.Unlock()
 
 	arr := c.queueItems
-	c.queueItems = make([]clientRequest, 0)
+	c.queueItems = make([]*clientRequest, 0)
 	return arr
 }
 
