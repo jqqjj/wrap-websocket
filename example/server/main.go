@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/jqqjj/wrap-websocket"
 	"net"
 	"net/http"
+
+	"github.com/gorilla/websocket"
+	"github.com/jqqjj/wrap-websocket"
 )
 
 func main() {

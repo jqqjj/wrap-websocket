@@ -18,7 +18,7 @@ func main() {
 	)
 	defer cancel()
 
-	client := wrap.NewClient(uuid.NewV4().String(), uri, "0.1", time.Second*15)
+	client := wrap.NewClient[string](uuid.NewV4().String(), uri, "0.1", time.Second*15)
 	go client.Run(ctx)
 
 	client.Subscribe(ctx, "haha", ch)

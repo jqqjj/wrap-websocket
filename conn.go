@@ -3,9 +3,10 @@ package wrap
 import (
 	"context"
 	"fmt"
-	"github.com/gorilla/websocket"
 	"net"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 type Conn struct {

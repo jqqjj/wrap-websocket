@@ -82,6 +82,9 @@ func (e *PubSub[TOPIC, DATA]) Publish(topic TOPIC, data DATA) {
 }
 
 func (e *PubSub[TOPIC, DATA]) TopicCount() int {
+	e.mux.RLock()
+	defer e.mux.RUnlock()
+
 	return len(e.subscribers)
 }
 
