@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -33,7 +32,7 @@ type ResponseEntity struct {
 }
 
 type TopicString interface {
-	fmt.Stringer
+	String() string
 	comparable
 }
 
