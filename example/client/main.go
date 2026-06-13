@@ -22,20 +22,36 @@ var e1 Event
 
 func main() {
 	var (
-		ch          = make(chan wrap.PubSubChan[Event, []byte])
 		uri         = fmt.Sprintf("ws://%s/", "localhost:8089")
-		ctx, cancel = context.WithTimeout(context.Background(), time.Minute*1)
+		ctx, cancel = context.WithTimeout(context.Background(), time.Second*10)
 	)
 	defer cancel()
 
 	client := wrap.NewClient[Event](uuid.NewV4().String(), uri, "0.1", time.Second*15)
 	go client.Run(ctx)
 
-	client.Subscribe(ctx, e1, ch)
+	ch := client.Subscribe(ctx, e1)
 
 	go func() {
 		for v := range ch {
+			select {
+			case <-v.Ctx.Done():
+				log.Println("结束")
+				return
+			default:
+			}
 			log.Println("收到推送", string(v.Data))
+		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("结束")
+				return
+			case <-time.After(time.Second * 2):
+			}
+			client.Publish(e1, []byte("hello world"))
 		}
 	}()
 

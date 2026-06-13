@@ -6,6 +6,7 @@ import (
 )
 
 type PubSubChan[TOPIC comparable, DATA any] struct {
+	Ctx   context.Context
 	Topic TOPIC
 	Data  DATA
 }
@@ -27,7 +28,7 @@ func NewPubSub[TOPIC comparable, DATA any]() *PubSub[TOPIC, DATA] {
 	}
 }
 
-func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC, ch chan<- PubSubChan[TOPIC, DATA]) {
+func (e *PubSub[TOPIC, DATA]) SubscribeChan(ctx context.Context, topic TOPIC, ch chan<- PubSubChan[TOPIC, DATA]) {
 	e.mux.Lock()
 	defer e.mux.Unlock()
 
@@ -42,21 +43,25 @@ func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC, ch cha
 		e.mux.Lock()
 		defer e.mux.Unlock()
 
-		index := -1
-		for i, v := range e.subscribers[topic] {
+		n := 0
+		for _, v := range e.subscribers[topic] {
 			if v.ch == ch {
-				index = i
-				break
+				continue
 			}
+			e.subscribers[topic][n] = v
+			n++
 		}
-		if index > -1 {
-			copy(e.subscribers[topic][index:], e.subscribers[topic][index+1:])
-			e.subscribers[topic] = e.subscribers[topic][:len(e.subscribers[topic])-1]
-		}
+		e.subscribers[topic] = e.subscribers[topic][:n]
 		if len(e.subscribers[topic]) == 0 {
 			delete(e.subscribers, topic)
 		}
 	}()
+}
+
+func (e *PubSub[TOPIC, DATA]) Subscribe(ctx context.Context, topic TOPIC) <-chan PubSubChan[TOPIC, DATA] {
+	ch := make(chan PubSubChan[TOPIC, DATA])
+	e.SubscribeChan(ctx, topic, ch)
+	return ch
 }
 
 func (e *PubSub[TOPIC, DATA]) Publish(topic TOPIC, data DATA) {
@@ -68,12 +73,12 @@ func (e *PubSub[TOPIC, DATA]) Publish(topic TOPIC, data DATA) {
 			select {
 			case <-v.ctx.Done():
 				continue
-			case v.ch <- PubSubChan[TOPIC, DATA]{Topic: topic, Data: data}:
+			case v.ch <- PubSubChan[TOPIC, DATA]{Ctx: v.ctx, Topic: topic, Data: data}:
 			default:
 				go func(ctx context.Context, ch chan<- PubSubChan[TOPIC, DATA]) {
 					select {
 					case <-ctx.Done():
-					case ch <- PubSubChan[TOPIC, DATA]{Topic: topic, Data: data}:
+					case ch <- PubSubChan[TOPIC, DATA]{Ctx: ctx, Topic: topic, Data: data}:
 					}
 				}(v.ctx, v.ch)
 			}
