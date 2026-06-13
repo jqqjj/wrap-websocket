@@ -23,6 +23,7 @@ type clientRequest struct {
 	tryLeft       int
 	body          clientEntity
 	cancelWaiting context.CancelFunc
+	canceled      bool
 }
 
 type ResponseEntity struct {
@@ -117,8 +118,6 @@ func (c *Client[T]) SendTries(ctx context.Context, tries int, command string, da
 
 func (c *Client[T]) sendTries(ctx context.Context, tries int, command string, data any) (*ResponseEntity, error) {
 	var (
-		ch = make(chan PubSubChan[string, []byte])
-
 		entity ResponseEntity
 
 		reqId             = uuid.NewV4().String()
@@ -126,12 +125,12 @@ func (c *Client[T]) sendTries(ctx context.Context, tries int, command string, da
 	)
 	defer subCancel()
 
-	c.pubSubReq.Subscribe(subCtx, reqId, ch)
+	ch := c.pubSubReq.Subscribe(subCtx, reqId)
 
 	if tries < 1 {
 		tries = 1
 	}
-	c.queue(&clientRequest{
+	req := &clientRequest{
 		tryLeft: tries,
 		body: clientEntity{
 			ClientId:  c.clientId,
@@ -140,10 +139,13 @@ func (c *Client[T]) sendTries(ctx context.Context, tries int, command string, da
 			Command:   command,
 			Payload:   data,
 		},
-	})
+	}
+	c.queue(req)
 
 	select {
 	case <-subCtx.Done():
+		req.canceled = true
+		c.removeRequest(reqId)
 		select {
 		case <-ctx.Done():
 			return nil, ErrCanceled
@@ -235,7 +237,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 		for {
 			var resp struct {
 				RequestId string          `json:"request_id"`
-				Type      string          `json:"type"` //response push
+				Type      string          `json:"type"` // response push
 				Body      json.RawMessage `json:"body"`
 			}
 			if _, data, err = conn.ReadMessage(); err != nil {
@@ -309,6 +311,9 @@ func (c *Client[T]) runSending(ctx context.Context, conn *websocket.Conn) {
 				c.publishAttemptsExhausted(req.body.RequestId)
 				continue
 			}
+			if req.canceled {
+				continue
+			}
 
 			//保存到发送中队列
 			subCtx, subCancel := context.WithCancel(context.Background())
@@ -356,6 +361,26 @@ func (c *Client[T]) publishAttemptsExhausted(requestId string) {
 	c.pubSubReq.Publish(requestId, data)
 }
 
+func (c *Client[T]) removeRequest(requestId string) {
+	c.queueMux.Lock()
+	queueItems := c.queueItems[:0]
+	for _, item := range c.queueItems {
+		if item.body.RequestId == requestId {
+			continue
+		}
+		queueItems = append(queueItems, item)
+	}
+	c.queueItems = queueItems
+	c.queueMux.Unlock()
+
+	if val, ok := c.querying.LoadAndDelete(requestId); ok {
+		req := val.(*clientRequest)
+		if req.cancelWaiting != nil {
+			req.cancelWaiting()
+		}
+	}
+}
+
 func (c *Client[T]) queue(items ...*clientRequest) {
 	c.queueMux.Lock()
 	defer c.queueMux.Unlock()
@@ -378,6 +403,14 @@ func (c *Client[T]) dequeueAll() []*clientRequest {
 	return arr
 }
 
-func (c *Client[T]) Subscribe(ctx context.Context, topic T, ch chan<- PubSubChan[T, []byte]) {
-	c.pubSub.Subscribe(ctx, topic, ch)
+func (c *Client[T]) SubscribeChan(ctx context.Context, topic T, ch chan<- PubSubChan[T, []byte]) {
+	c.pubSub.SubscribeChan(ctx, topic, ch)
+}
+
+func (c *Client[T]) Subscribe(ctx context.Context, topic T) <-chan PubSubChan[T, []byte] {
+	return c.pubSub.Subscribe(ctx, topic)
+}
+
+func (c *Client[T]) Publish(topic T, data []byte) {
+	c.pubSub.Publish(topic, data)
 }
