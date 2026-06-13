@@ -43,6 +43,9 @@ func (e *PubSub[TOPIC, DATA]) SubscribeChan(ctx context.Context, topic TOPIC, ch
 		e.mux.Lock()
 		defer e.mux.Unlock()
 
+		if _, ok := e.subscribers[topic]; !ok {
+			return
+		}
 		n := 0
 		for _, v := range e.subscribers[topic] {
 			if v.ch == ch {
