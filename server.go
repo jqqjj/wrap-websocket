@@ -64,13 +64,14 @@ func (s *Server) Process(ctx context.Context, conn *Conn) {
 			meta = &sync.Map{}
 		}
 		reqEntity := &Request{
-			ClientId:   req.ClientId,
-			Version:    req.Version,
-			RequestId:  req.RequestId,
-			Command:    req.Command,
-			Payload:    req.Payload,
-			ClientAddr: addr,
-			meta:       meta,
+			ClientId:    req.ClientId,
+			Version:     req.Version,
+			RequestId:   req.RequestId,
+			Command:     req.Command,
+			Payload:     req.Payload,
+			ClientAddr:  addr,
+			sessionMeta: meta,
+			flashMeta:   &sync.Map{},
 		}
 
 		//处理心跳包

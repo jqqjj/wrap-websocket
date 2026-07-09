@@ -14,28 +14,45 @@ type Request struct {
 	Payload    json.RawMessage
 	ClientAddr net.Addr
 
-	meta *sync.Map
+	sessionMeta *sync.Map
+	flashMeta   *sync.Map
 }
 
-func (r *Request) Set(key string, value any) {
-	r.meta.Store(key, value)
+func (r *Request) Set(key string, value any, flash ...bool) {
+	if len(flash) > 0 && flash[0] {
+		r.flashMeta.Store(key, value)
+	} else {
+		r.sessionMeta.Store(key, value)
+	}
 }
 
-func (r *Request) Delete(key string) {
-	r.meta.Delete(key)
+func (r *Request) Delete(key string, flash ...bool) {
+	if len(flash) > 0 && flash[0] {
+		r.flashMeta.Delete(key)
+	} else {
+		r.sessionMeta.Delete(key)
+	}
 }
 
-func (r *Request) Get(key string) (any, bool) {
-	return r.meta.Load(key)
+func (r *Request) Get(key string, flash ...bool) (any, bool) {
+	if len(flash) > 0 && flash[0] {
+		return r.flashMeta.Load(key)
+	} else {
+		return r.sessionMeta.Load(key)
+	}
 }
 
-func (r *Request) Has(key string) bool {
-	_, ok := r.meta.Load(key)
-	return ok
+func (r *Request) Has(key string, flash ...bool) (ok bool) {
+	if len(flash) > 0 && flash[0] {
+		_, ok = r.flashMeta.Load(key)
+	} else {
+		_, ok = r.sessionMeta.Load(key)
+	}
+	return
 }
 
-func (r *Request) MustGet(key string) any {
-	if o, ok := r.Get(key); ok {
+func (r *Request) MustGet(key string, flash ...bool) any {
+	if o, ok := r.Get(key, flash...); ok {
 		return o
 	}
 	panic("object not found: " + key)
