@@ -204,6 +204,14 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 		subCtx, subCancel = context.WithCancel(ctx)
 	)
 
+	//计算需要重发的请求
+	histories := make([]*clientRequest, 0)
+	c.querying.Range(func(key, value any) bool {
+		histories = append(histories, value.(*clientRequest))
+		c.querying.Delete(key)
+		return true
+	})
+
 	//建立监听外部退出任务 & 心跳包发送
 	wg.Add(1)
 	go func() {
@@ -273,13 +281,7 @@ func (c *Client[T]) loop(ctx context.Context, conn *websocket.Conn) {
 		callback(c)
 	}
 
-	//把正在发送中的队列重发
-	histories := make([]*clientRequest, 0)
-	c.querying.Range(func(key, value any) bool {
-		histories = append(histories, value.(*clientRequest))
-		c.querying.Delete(key)
-		return true
-	})
+	//需要重发的请求入列
 	c.queue(histories...)
 
 	wg.Wait()
